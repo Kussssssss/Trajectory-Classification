@@ -70,6 +70,17 @@ if 'processor' not in st.session_state:
     st.session_state.animation_frame = 0
     st.session_state.show_animation = False
 
+# --- Helper: Chuyển DataFrame sang định dạng Arrow-compatible ---
+def make_dataframe_arrow_compatible(df):
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            non_null = df[col].dropna()
+            if not non_null.empty:
+                sample = non_null.iloc[0]
+                if isinstance(sample, (list, np.ndarray)):
+                    df[col] = df[col].apply(lambda x: np.mean(x) if isinstance(x, (list, np.ndarray)) else x)
+    return df
+
 # --- Các hàm xử lý dữ liệu ---
 @st.cache_resource
 def load_data():
@@ -95,7 +106,6 @@ def train_model():
 
 # --- Các hàm trực quan hóa ---
 def create_trajectory_map(trajectories, labels, sample_size=50):
-    # Lấy mẫu nếu số lượng quá lớn
     if len(trajectories) > sample_size:
         indices = np.random.choice(len(trajectories), sample_size, replace=False)
         sample_trajs = [trajectories[i] for i in indices]
@@ -104,7 +114,6 @@ def create_trajectory_map(trajectories, labels, sample_size=50):
         sample_trajs = trajectories
         sample_labels = labels
 
-    # Tạo dataframe để vẽ
     df_points = []
     for i, traj in enumerate(sample_trajs):
         category = sample_labels[i]
@@ -118,8 +127,6 @@ def create_trajectory_map(trajectories, labels, sample_size=50):
                 'time_step': j
             })
     df = pd.DataFrame(df_points)
-
-    # Tạo bản đồ với Plotly Express
     fig = px.line_geo(
         df, 
         lat='latitude', 
@@ -129,7 +136,6 @@ def create_trajectory_map(trajectories, labels, sample_size=50):
         line_group='traj_id',
         title='Quỹ đạo bão theo loại'
     )
-    # Thêm điểm khởi đầu
     start_points = df[df['point_id'] == 0]
     fig.add_trace(
         go.Scattergeo(
@@ -160,17 +166,28 @@ def create_trajectory_map(trajectories, labels, sample_size=50):
     return fig, df
 
 def create_animated_trajectory_map(df):
-    # Sử dụng cột 'time_step' để tạo animation
+    # Tính số frame tối đa dựa trên cột time_step
+    max_frame = int(df['time_step'].max())
+    # Tạo DataFrame tích lũy: với mỗi frame f, bao gồm các điểm có time_step <= f
+    df_list = []
+    for f in range(max_frame + 1):
+        temp = df[df['time_step'] <= f].copy()
+        temp['frame'] = f  # thêm cột frame mới
+        df_list.append(temp)
+    df_accumulated = pd.concat(df_list)
+    
+    # Tạo animation bằng Plotly Express, sử dụng cột 'frame'
     fig = px.line_geo(
-        df, 
+        df_accumulated, 
         lat='latitude', 
         lon='longitude',
         color='category',
         color_discrete_sequence=['blue', 'green', 'red', 'purple', 'orange', 'brown'],
         line_group='traj_id',
-        animation_frame='time_step',
+        animation_frame='frame',
         title='Animation quỹ đạo bão'
     )
+    
     fig.update_layout(
         height=600,
         legend_title_text='Loại bão',
@@ -207,10 +224,10 @@ def create_animated_trajectory_map(df):
             'y': 0
         }]
     )
+    
     return fig
 
 def create_3d_trajectory_plot(trajectories, labels, sample_size=20):
-    # Lấy mẫu nếu cần
     if len(trajectories) > sample_size:
         indices = np.random.choice(len(trajectories), sample_size, replace=False)
         sample_trajs = [trajectories[i] for i in indices]
@@ -241,7 +258,7 @@ def create_3d_trajectory_plot(trajectories, labels, sample_size=20):
         color='category',
         color_discrete_sequence=['blue', 'green', 'red', 'purple', 'orange', 'brown'],
         line_group='traj_id',
-        title='3D Quỹ đạo bão (trục Z là thời gian chuẩn hóa)'
+        title='3D Quỹ đạo bão (trục Z: thời gian chuẩn hóa)'
     )
     start_points = df[df['point_id'] == 0]
     fig.add_trace(
@@ -268,7 +285,6 @@ def create_3d_trajectory_plot(trajectories, labels, sample_size=20):
     return fig
 
 def create_velocity_profile(trajectories, labels, sample_size=10):
-    # Lấy mẫu
     if len(trajectories) > sample_size:
         indices = np.random.choice(len(trajectories), sample_size, replace=False)
         sample_trajs = [trajectories[i] for i in indices]
@@ -422,7 +438,6 @@ def create_normalized_trajectory_plot(processor, category=None):
     return fig
 
 def create_hurricane_impact_visualization(features_df):
-    # Nếu có trường 'impact_score', dùng nó; nếu không, dùng 'traj_duration' làm ví dụ
     if 'impact_score' in features_df.columns:
         fig = px.histogram(features_df, x='impact_score', color='category', 
                            color_discrete_sequence=['blue', 'green', 'red', 'purple', 'orange', 'brown'],
@@ -439,7 +454,7 @@ def show_home_page():
     st.title("Phân tích quỹ đạo bão và dự đoán")
     st.write("""
     Chào mừng bạn đến với ứng dụng phân tích quỹ đạo bão và dự đoán loại bão. Dashboard này cho phép bạn khám phá dữ liệu quỹ đạo bão,
-    trực quan hóa các mẫu và dự đoán loại bão dựa trên các đặc trưng quỹ đạo.
+    trực quan hóa các mẫu và dự đoán loại bão dựa trên đặc trưng quỹ đạo.
     """)
     st.header("Tổng quan dữ liệu")
     if not st.session_state.data_loaded:
@@ -474,7 +489,7 @@ def show_home_page():
                 title='Phân bố loại bão'
             )
             fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-            st.plotly_chart(fig)
+            st.plotly_chart(fig, use_container_width=True)
     st.header("Các mục trong ứng dụng")
     col1, col2 = st.columns(2)
     with col1:
@@ -517,7 +532,8 @@ def show_trajectory_explorer():
         st.plotly_chart(fig, use_container_width=True)
     st.header("Thống kê trajectory theo loại")
     if st.session_state.features_extracted:
-        features_df = processor.features_df
+        features_df = st.session_state.processor.features_df.copy()
+        features_df = make_dataframe_arrow_compatible(features_df)
         filtered_features = features_df[features_df['category'].isin(selected_categories)]
         grouped = filtered_features.groupby('category').agg({
             'traj_length': ['mean', 'min', 'max'],
@@ -527,6 +543,7 @@ def show_trajectory_explorer():
             'lat_range': ['mean', 'min', 'max']
         }).reset_index()
         grouped.columns = ['_'.join(col).strip('_') for col in grouped.columns.values]
+        grouped = make_dataframe_arrow_compatible(grouped)
         st.dataframe(grouped)
     else:
         st.info("Vui lòng trích xuất đặc trưng để xem thống kê trajectory.")
@@ -537,7 +554,8 @@ def show_feature_analysis():
         st.info("Vui lòng trích xuất đặc trưng bằng nút ở thanh bên.")
         return
     processor = st.session_state.processor
-    features_df = processor.features_df
+    features_df = st.session_state.processor.features_df.copy()
+    features_df = make_dataframe_arrow_compatible(features_df)
     st.sidebar.header("Chọn đặc trưng")
     feature_options = [col for col in features_df.columns if col not in ['traj_id', 'category']]
     selected_feature = st.sidebar.selectbox(
@@ -548,7 +566,7 @@ def show_feature_analysis():
     st.header(f"Phân phối {selected_feature} theo loại bão")
     with st.spinner("Tạo biểu đồ phân phối..."):
         fig = create_feature_distribution_plot(features_df, selected_feature)
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=True)
     st.header("Ma trận tương quan của đặc trưng")
     correlation_features = st.multiselect(
         "Chọn các đặc trưng để phân tích tương quan",
@@ -564,10 +582,10 @@ def show_feature_analysis():
         st.pyplot(fig)
     if st.session_state.model_trained:
         st.header("Tầm quan trọng của đặc trưng trong dự đoán loại bão")
-        model_results = train_model()  # cached
+        model_results = train_model()
         with st.spinner("Tạo biểu đồ tầm quan trọng..."):
             fig = create_feature_importance_plot(model_results)
-            st.pyplot(fig)
+            st.plotly_chart(fig, use_container_width=True)
 
 def show_prediction_model():
     st.title("Mô hình dự đoán loại bão")
@@ -575,7 +593,7 @@ def show_prediction_model():
         st.info("Vui lòng huấn luyện mô hình bằng nút ở thanh bên.")
         return
     processor = st.session_state.processor
-    model_results = train_model()  # cached
+    model_results = train_model()
     st.header("Hiệu năng của mô hình")
     col1, col2 = st.columns(2)
     with col1:
@@ -586,10 +604,10 @@ def show_prediction_model():
     with col2:
         st.subheader("Ma trận nhầm lẫn")
         fig_cm = create_confusion_matrix_plot(model_results)
-        st.pyplot(fig_cm)
+        st.plotly_chart(fig_cm, use_container_width=True)
     st.header("Tầm quan trọng của đặc trưng")
     fig_fi = create_feature_importance_plot(model_results)
-    st.pyplot(fig_fi)
+    st.plotly_chart(fig_fi, use_container_width=True)
     st.header("Dự đoán loại bão cho quỹ đạo mới")
     uploaded_file = st.file_uploader("Tải lên file dữ liệu quỹ đạo mới (pickle hoặc CSV)", type=["pkl", "csv"])
     if uploaded_file is not None:
@@ -628,7 +646,7 @@ def show_trajectory_comparison():
     st.header("So sánh quỹ đạo chuẩn hóa")
     with st.spinner("Tạo biểu đồ quỹ đạo chuẩn hóa..."):
         fig = create_normalized_trajectory_plot(processor, None if selected_category == "Tất cả" else selected_category)
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=True)
 
 def show_hurricane_impact():
     st.title("Trực quan hóa tác động bão")
@@ -636,7 +654,8 @@ def show_hurricane_impact():
         st.info("Vui lòng trích xuất đặc trưng để xem trực quan hóa tác động bão.")
         return
     processor = st.session_state.processor
-    features_df = processor.features_df
+    features_df = processor.features_df.copy()
+    features_df = make_dataframe_arrow_compatible(features_df)
     fig = create_hurricane_impact_visualization(features_df)
     st.plotly_chart(fig, use_container_width=True)
 
