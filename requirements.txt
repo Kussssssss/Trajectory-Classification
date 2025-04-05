@@ -1,0 +1,17 @@
+name: Hurricane Trajectory Analysis App
+description: A Streamlit application for analyzing hurricane trajectories, visualizing patterns, and predicting hurricane categories.
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - pactus
+    - streamlit
+    - matplotlib
+    - cartopy
+    - yupi
+    - numpy
+    - pandas
+    - xgboost
+    - seaborn
+    - scikit-learn
+    - plotly

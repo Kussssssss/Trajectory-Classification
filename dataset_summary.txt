@@ -1,0 +1,9 @@
+Dataset Name: hurdat2
+Total Trajectories: 1903
+Classes: 6
+Min Trajectory Length: 3
+Max Trajectory Length: 133
+Avg Trajectory Length: 28.068313189700472
+Min Duration (hours): 43200.0
+Max Duration (hours): 2829600.0
+Avg Duration (hours): 573416.8155543878
