@@ -10,6 +10,8 @@ import time
 from data_processing import HurricaneDataProcessor
 import os
 import pickle
+import folium
+from streamlit_folium import st_folium
 
 # Cấu hình trang
 st.set_page_config(
@@ -166,17 +168,15 @@ def create_trajectory_map(trajectories, labels, sample_size=50):
     return fig, df
 
 def create_animated_trajectory_map(df):
-    # Tính số frame tối đa dựa trên cột time_step
+    # Tích lũy các điểm: với mỗi frame f, hiển thị các điểm có time_step <= f
     max_frame = int(df['time_step'].max())
-    # Tạo DataFrame tích lũy: với mỗi frame f, bao gồm các điểm có time_step <= f
     df_list = []
     for f in range(max_frame + 1):
         temp = df[df['time_step'] <= f].copy()
-        temp['frame'] = f  # thêm cột frame mới
+        temp['frame'] = f
         df_list.append(temp)
     df_accumulated = pd.concat(df_list)
     
-    # Tạo animation bằng Plotly Express, sử dụng cột 'frame'
     fig = px.line_geo(
         df_accumulated, 
         lat='latitude', 
@@ -187,7 +187,6 @@ def create_animated_trajectory_map(df):
         animation_frame='frame',
         title='Animation quỹ đạo bão'
     )
-    
     fig.update_layout(
         height=600,
         legend_title_text='Loại bão',
@@ -224,7 +223,6 @@ def create_animated_trajectory_map(df):
             'y': 0
         }]
     )
-    
     return fig
 
 def create_3d_trajectory_plot(trajectories, labels, sample_size=20):
@@ -335,6 +333,90 @@ def create_velocity_profile(trajectories, labels, sample_size=10):
         fig.update_yaxes(title_text='Vận tốc', row=i+1, col=1)
     fig.update_xaxes(title_text='Tiến trình trajectory (%)', row=len(sample_trajs), col=1)
     return fig
+# --- Hàm tính khoảng cách theo Haversine ---
+def haversine(lon1, lat1, lon2, lat2):
+    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    r = 6371  # bán kính Trái đất km
+    return c * r
+
+# --- Trang dự đoán qua vẽ đường đi của bão ---
+def show_drawing_prediction():
+    st.title("Dự đoán loại bão từ đường vẽ")
+    st.write("Trên bản đồ dưới đây, hãy sử dụng công cụ vẽ (Polyline) để vẽ đường đi của bão quanh khu vực châu Mỹ.")
+    
+    # Tạo bản đồ với folium, trung tâm châu Mỹ
+    m = folium.Map(location=[37, -95], zoom_start=4)
+    draw = folium.plugins.Draw(
+        export=True,
+        draw_options={
+            'polyline': True,
+            'polygon': False,
+            'circle': False,
+            'rectangle': False,
+            'marker': False,
+            'circlemarker': False
+        }
+    )
+    draw.add_to(m)
+    output = st_folium(m, width=700, height=500)
+    
+    if output and output.get('last_active_drawing'):
+        geojson = output['last_active_drawing']
+        if geojson['geometry']['type'] == 'LineString':
+            coords = geojson['geometry']['coordinates']  # [ [lon, lat], ... ]
+            st.subheader("Đường bạn vẽ:")
+            st.write(coords)
+            
+            # Tính các đặc trưng từ đường vẽ:
+            # Giả sử thời gian giữa các điểm là 1 giờ
+            total_distance = 0
+            speeds = []
+            lons = []
+            lats = []
+            for i in range(len(coords)-1):
+                lon1, lat1 = coords[i]
+                lon2, lat2 = coords[i+1]
+                d = haversine(lon1, lat1, lon2, lat2)
+                total_distance += d
+                speeds.append(d)  # km/h
+                lons.extend([lon1, lon2])
+                lats.extend([lat1, lat2])
+            average_speed = np.mean(speeds) if speeds else 0
+            max_speed = np.max(speeds) if speeds else 0
+            lon_range = max(lons) - min(lons) if lons else 0
+            lat_range = max(lats) - min(lats) if lats else 0
+            
+            st.write(f"**Tổng quãng đường:** {total_distance:.2f} km")
+            st.write(f"**Vận tốc trung bình:** {average_speed:.2f} km/h")
+            st.write(f"**Vận tốc tối đa:** {max_speed:.2f} km/h")
+            st.write(f"**Khoảng cách kinh độ:** {lon_range:.2f} độ")
+            st.write(f"**Khoảng cách vĩ độ:** {lat_range:.2f} độ")
+            
+            # Tạo vector đặc trưng: giả sử mô hình yêu cầu các đặc trưng này
+            feature_vector = np.array([total_distance, average_speed, max_speed, lon_range, lat_range]).reshape(1, -1)
+            st.write("Vector đặc trưng:")
+            st.write(feature_vector)
+            
+            # Dự đoán loại bão (giả sử mô hình đã được huấn luyện và lưu trong processor.model)
+            try:
+                prediction = st.session_state.processor.model.predict(feature_vector)[0]
+                st.success(f"Dự đoán loại bão: {prediction}")
+            except Exception as e:
+                st.error(f"Lỗi khi dự đoán: {e}")
+            
+            # Hiển thị đường vẽ lên bản đồ (sử dụng folium)
+            m2 = folium.Map(location=[np.mean(lats), np.mean(lons)], zoom_start=5)
+            folium.PolyLine(locations=[(lat, lon) for lon, lat in coords], color='red', weight=3).add_to(m2)
+            st.subheader("Đường vẽ trên bản đồ:")
+            st_folium(m2, width=700, height=500)
+        else:
+            st.error("Vui lòng vẽ một đường polyline.")
+    else:
+        st.info("Vui lòng vẽ đường đi của bão trên bản đồ.")
 
 def create_feature_importance_plot(model_results):
     feature_importance = model_results['feature_importance']
@@ -449,7 +531,32 @@ def create_hurricane_impact_visualization(features_df):
     fig.update_layout(height=500)
     return fig
 
-# --- Các trang giao diện ---
+# --- Các hàm giao diện dự đoán dữ liệu đầu vào thực tế ---
+def show_real_input_prediction():
+    st.title("Dự đoán từ dữ liệu đầu vào thực tế")
+    st.write("Tải lên file CSV chứa dữ liệu trajectory với các cột: t, longitude, latitude")
+    uploaded_file = st.file_uploader("Chọn file CSV", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            df_input = pd.read_csv(uploaded_file)
+            st.subheader("Dữ liệu đầu vào:")
+            st.dataframe(df_input)
+            # Tạo đối tượng trajectory từ dữ liệu CSV
+            # Giả sử file CSV có các cột: t, longitude, latitude
+            traj_input = type("Trajectory", (object,), {})()
+            traj_input.t = df_input["t"].values
+            traj_input.r = df_input[["longitude", "latitude"]].values
+            # Chuyển đổi dữ liệu trajectory thành vector đặc trưng sử dụng featurizer của mô hình
+            features = st.session_state.processor.model.featurizer.transform(traj_input)
+            prediction = st.session_state.processor.model.predict([features])[0]
+            st.success(f"Dự đoán loại bão: {prediction}")
+            # Hiển thị trajectory lên bản đồ
+            fig, _ = create_trajectory_map([traj_input], [prediction], sample_size=1)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Lỗi xử lý dữ liệu đầu vào: {e}")
+
+# --- Các trang giao diện chính ---
 def show_home_page():
     st.title("Phân tích quỹ đạo bão và dự đoán")
     st.write("""
@@ -616,18 +723,23 @@ def show_prediction_model():
                 new_data = pickle.load(uploaded_file)
             else:
                 new_data = pd.read_csv(uploaded_file)
-            prediction = processor.predict_new_trajectory(new_data)
+            # Giả sử new_data đã được xử lý tương tự như dữ liệu huấn luyện
+            features = st.session_state.processor.model.featurizer.transform(new_data)
+            prediction = st.session_state.processor.model.predict([features])[0]
             st.success(f"Dự đoán loại bão: {prediction}")
         except Exception as e:
             st.error(f"Lỗi trong quá trình dự đoán: {e}")
     st.header("Dự đoán quỹ đạo ảo từ tập kiểm tra")
     if st.session_state.data_loaded:
-        dataset = processor.dataset if hasattr(processor, "dataset") else load_data()
-        idx = st.number_input("Chọn số thứ tự của trajectory trong tập kiểm tra", min_value=0, max_value=len(dataset.trajs)-1, value=0, step=1)
+        dataset = st.session_state.processor.dataset if hasattr(st.session_state.processor, "dataset") else load_data()
+        idx = st.number_input("Chọn số thứ tự của trajectory trong tập kiểm tra", 
+                              min_value=0, max_value=len(dataset.trajs)-1, value=0, step=1)
         traj_ao = dataset.trajs[idx]
         groundtruth = dataset.labels[idx]
         try:
-            pred_ao = processor.predict_new_trajectory(traj_ao)
+            # Sử dụng dữ liệu thực tế của trajectory để chuyển đổi thành vector đặc trưng
+            features = st.session_state.processor.model.featurizer.transform(traj_ao)
+            pred_ao = st.session_state.processor.model.predict([features])[0]
         except Exception as e:
             pred_ao = f"Lỗi: {e}"
         st.write(f"**Nhãn thực tế:** {groundtruth}")
@@ -677,6 +789,28 @@ def show_advanced_visualizations():
     fig_velocity = create_velocity_profile(dataset.trajs, dataset.labels, sample_size=10)
     st.plotly_chart(fig_velocity, use_container_width=True)
 
+def show_real_input_prediction():
+    st.title("Dự đoán từ dữ liệu đầu vào thực tế")
+    st.write("Tải lên file CSV chứa dữ liệu trajectory với các cột: t, longitude, latitude")
+    uploaded_file = st.file_uploader("Chọn file CSV", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            df_input = pd.read_csv(uploaded_file)
+            st.subheader("Dữ liệu đầu vào:")
+            st.dataframe(df_input)
+            # Tạo đối tượng trajectory từ dữ liệu CSV
+            traj_input = type("Trajectory", (object,), {})()
+            traj_input.t = df_input["t"].values
+            traj_input.r = df_input[["longitude", "latitude"]].values
+            # Chuyển đổi dữ liệu trajectory thành vector đặc trưng bằng featurizer của mô hình
+            features = st.session_state.processor.model.featurizer.transform(traj_input)
+            prediction = st.session_state.processor.model.predict([features])[0]
+            st.success(f"Dự đoán loại bão: {prediction}")
+            fig, _ = create_trajectory_map([traj_input], [prediction], sample_size=1)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Lỗi xử lý dữ liệu đầu vào: {e}")
+
 # --- Hàm chính ---
 def main():
     st.sidebar.title("Phân tích bão")
@@ -698,7 +832,7 @@ def main():
     st.sidebar.header("Điều hướng")
     page = st.sidebar.radio(
         "Chọn mục",
-        ["Trang chủ", "Trình duyệt quỹ đạo", "Phân tích đặc trưng", "Mô hình dự đoán", "So sánh quỹ đạo", "Trực quan hóa nâng cao", "Tác động bão"]
+        ["Trang chủ", "Trình duyệt quỹ đạo", "Phân tích đặc trưng", "Mô hình dự đoán", "So sánh quỹ đạo", "Trực quan hóa nâng cao", "Tác động bão", "Dữ liệu đầu vào thực tế", "Vẽ quỹ đạo để dự đoán"]
     )
     if page == "Trang chủ":
         show_home_page()
@@ -714,6 +848,10 @@ def main():
         show_advanced_visualizations()
     elif page == "Tác động bão":
         show_hurricane_impact()
+    elif page == "Dữ liệu đầu vào thực tế":
+        show_real_input_prediction()
+    elif page == "Vẽ quỹ đạo để dự đoán":
+        show_drawing_prediction()
 
 if __name__ == "__main__":
     main()
