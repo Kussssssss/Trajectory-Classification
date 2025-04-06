@@ -1,5 +1,7 @@
-name: Hurricane Trajectory Analysis App
+name: CS313
 description: A Streamlit application for analyzing hurricane trajectories, visualizing patterns, and predicting hurricane categories.
+channels:
+  - conda-forge
 dependencies:
   - python=3.10
   - pip
