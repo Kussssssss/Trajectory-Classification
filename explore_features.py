@@ -13,6 +13,8 @@ from matplotlib.colors import LinearSegmentedColormap
 SEED = 0
 datasets = Dataset.hurdat2()
 
+universal_features = featurizers.UniversalFeaturizer()
+# universal_features.describe(detailed=True)
 # Explore available featurizers
 print("Available featurizers in Pactus:")
 for featurizer_name in dir(featurizers):
@@ -89,9 +91,120 @@ def extract_basic_stats(trajs, labels):
     ]
     
     return np.array(stats), feature_names
-
+feature_names = [
+    "time_mean",
+    "time_median",
+    "time_kurtosis",
+    "time_autocorr",
+    "time_min",
+    "time_max",
+    "time_range",
+    "time_std",
+    "time_var",
+    "time_coeff_var",
+    "time_iqr",
+    "time_jump_mean",
+    "time_jump_median",
+    "time_jump_kurtosis",
+    "time_jump_autocorr",
+    "time_jump_min",
+    "time_jump_max",
+    "time_jump_range",
+    "time_jump_std",
+    "time_jump_var",
+    "time_jump_coeff_var",
+    "time_jump_iqr",
+    "distance",
+    "displacement",
+    "jump_mean",
+    "jump_median",
+    "jump_kurtosis",
+    "jump_autocorr",
+    "jump_min",
+    "jump_max",
+    "jump_range",
+    "jump_std",
+    "jump_var",
+    "jump_coeff_var",
+    "jump_iqr",
+    "velocity_mean",
+    "velocity_median",
+    "velocity_kurtosis",
+    "velocity_autocorr",
+    "velocity_min",
+    "velocity_max",
+    "velocity_range",
+    "velocity_std",
+    "velocity_var",
+    "velocity_coeff_var",
+    "velocity_iqr",
+    "velocity_stop_rate",
+    "velocity_change_rate",
+    "acceleration_mean",
+    "acceleration_median",
+    "acceleration_kurtosis",
+    "acceleration_autocorr",
+    "acceleration_min",
+    "acceleration_max",
+    "acceleration_range",
+    "acceleration_std",
+    "acceleration_var",
+    "acceleration_coeff_var",
+    "acceleration_iqr",
+    "acceleration_change_rate_mean",
+    "acceleration_change_rate_median",
+    "acceleration_change_rate_kurtosis",
+    "acceleration_change_rate_autocorr",
+    "acceleration_change_rate_min",
+    "acceleration_change_rate_max",
+    "acceleration_change_rate_range",
+    "acceleration_change_rate_std",
+    "acceleration_change_rate_var",
+    "acceleration_change_rate_coeff_var",
+    "acceleration_change_rate_iqr",
+    "angle_mean",
+    "angle_median",
+    "angle_kurtosis",
+    "angle_autocorr",
+    "angle_min",
+    "angle_max",
+    "angle_range",
+    "angle_std",
+    "angle_var",
+    "angle_coeff_var",
+    "angle_iqr",
+    "turning_angle_mean",
+    "turning_angle_median",
+    "turning_angle_kurtosis",
+    "turning_angle_autocorr",
+    "turning_angle_min",
+    "turning_angle_max",
+    "turning_angle_range",
+    "turning_angle_std",
+    "turning_angle_var",
+    "turning_angle_coeff_var",
+    "turning_angle_iqr",
+    "turning_angle_change_rate_mean",
+    "turning_angle_change_rate_median",
+    "turning_angle_change_rate_kurtosis",
+    "turning_angle_change_rate_autocorr",
+    "turning_angle_change_rate_min",
+    "turning_angle_change_rate_max",
+    "turning_angle_change_rate_range",
+    "turning_angle_change_rate_std",
+    "turning_angle_change_rate_var",
+    "turning_angle_change_rate_coeff_var",
+    "turning_angle_change_rate_iqr"
+]
 # Extract features
-X, feature_names = extract_basic_stats(datasets.trajs, datasets.labels)
+filtered_trajs, filtered_labels = [traj for traj, label in zip(datasets.trajs, datasets.labels) 
+                  if len(traj) >= 5 
+                  and traj.r.delta.norm.sum() > 0], [label for traj, label in zip(datasets.trajs, datasets.labels) 
+                  if len(traj) >= 5 
+                  and traj.r.delta.norm.sum() > 0]
+print(f"Số lượng quỹ đạo hợp lệ: {len(filtered_trajs)} / {len(datasets.trajs)}")
+
+X = extract_basic_stats(filtered_trajs, filtered_labels)
 y = np.array(datasets.labels)
 
 print(f"\nExtracted basic statistics:")
@@ -105,9 +218,10 @@ df['hurricane_category'] = y
 
 print("\nSample of extracted features:")
 print(df.head())
-
+df.to_csv("hurricane_features.csv", index=False)
 # Analyze feature importance for hurricane category prediction
-from sklearn.ensemble import RandomForestClassifier
+# from sklearn.ensemble import RandomForestClassifier
+from pactus.models.random_forest_model import RandomForestModel
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
@@ -116,7 +230,7 @@ def analyze_feature_importance(X, y, feature_names, title):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=SEED)
     
     # Train a random forest classifier
-    rf = RandomForestClassifier(n_estimators=100, random_state=SEED)
+    rf = RandomForestModel(n_estimators=100, random_state=SEED, featurizer=universal_features)
     rf.fit(X_train, y_train)
     
     # Get feature importances
