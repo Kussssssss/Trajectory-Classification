@@ -71,6 +71,11 @@ if 'processor' not in st.session_state:
     st.session_state.animation_speed = 50
     st.session_state.animation_frame = 0
     st.session_state.show_animation = False
+    st.session_state.preprocessing_options = {
+        'outlier_method': 'winsorize',
+        'create_interactions': True,
+        'use_enhanced_features': True
+    }
 
 # --- Helper: Chuyển DataFrame sang định dạng Arrow-compatible ---
 def make_dataframe_arrow_compatible(df):
@@ -92,16 +97,28 @@ def load_data():
     return dataset
 
 @st.cache_data
-def extract_features():
+def extract_features(_use_features=True, _outlier_method='winsorize', _create_interactions=True):
     processor = st.session_state.processor
-    features_df = processor.extract_features()
+    
+    if _use_features:
+        features_df = processor.process_data_pipeline(
+            outlier_method=_outlier_method,
+            create_interactions=_create_interactions
+        )
+    else:
+        features_df = processor.extract_features()
+    
     st.session_state.features_extracted = True
-    return features_df
+    
+    return make_dataframe_arrow_compatible(features_df)
 
 @st.cache_resource
-def train_model():
-    processor = st.session_state.processor
-    model_results = processor.train_model()
+def train_model(_use_features=True):
+    processor = st.session_state.processor    
+    model_results = processor.train_model(
+        use_features=_use_features
+    )
+    
     st.session_state.model_trained = True
     processor.save_model()
     return model_results
