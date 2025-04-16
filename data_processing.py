@@ -450,10 +450,10 @@ class HurricaneDataProcessor:
             
         return self.features_df
     
-    def train_model(self, test_size=0.3, use_enhanced_features=True):
+    def train_model(self, test_size=0.3, use_features=True):
         """Train a Random Forest model to predict hurricane category"""
         if self.features_df is None:
-            if use_enhanced_features:
+            if use_features:
                 self.process_data_pipeline()
             else:
                 self.extract_features()

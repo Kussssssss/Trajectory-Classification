@@ -74,7 +74,7 @@ if 'processor' not in st.session_state:
     st.session_state.preprocessing_options = {
         'outlier_method': 'winsorize',
         'create_interactions': True,
-        'use_enhanced_features': True
+        'use_features': True
     }
 
 # --- Helper: Chuyển DataFrame sang định dạng Arrow-compatible ---
